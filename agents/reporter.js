@@ -25,12 +25,12 @@ const SCHEMA = {
       required: ['count', 'apparent_condition', 'visible_injuries'],
       additionalProperties: false
     },
-    hazards: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 6 },
+    hazards: { type: 'array', items: { type: 'string' } },
     environment: { type: 'string' },
     recommended_unit: { type: 'string', enum: ['air_rescue', 'water_rescue', 'ambulance', 'fire', 'police'] },
     access_route: { type: 'string' },
     what_responders_should_expect: { type: 'string' },
-    immediate_actions_needed: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 5 },
+    immediate_actions_needed: { type: 'array', items: { type: 'string' } },
     eta_priority: { type: 'string', enum: ['IMMEDIATE', 'URGENT', 'STANDARD'] },
     coordination_notes: { type: 'string' }
   },

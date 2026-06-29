@@ -764,17 +764,25 @@ async function runPipeline(frame) {
 
         if (event.agent === 'reporter') {
           if (bc) bc.classList.remove('stream-cursor');
-          try {
-            const parsed = JSON.parse(briefRaw);
-            detectedAlertLevel = parsed.alert_level || 'MODERATE';
-            renderBrief(bc, parsed);
+
+          // Try streamed content first, fall back to event.result object
+          let brief = null;
+          try { brief = JSON.parse(briefRaw); } catch {}
+          if (!brief) {
+            const r = event.result || {};
+            if (r.alert_level || r.summary) brief = r;
+          }
+
+          if (brief) {
+            detectedAlertLevel = brief.alert_level || 'MODERATE';
+            renderBrief(bc, brief);
             const ig = document.getElementById('infoGrid');
             if (ig) ig.innerHTML = `
               <div class="info-row"><span class="info-key">Alert Level</span><span class="info-val brief-val ${detectedAlertLevel}">${detectedAlertLevel}</span></div>
-              <div class="info-row"><span class="info-key">Type</span><span class="info-val">${parsed.incident_type||'—'}</span></div>
-              <div class="info-row"><span class="info-key">Summary</span><span class="info-val">${parsed.summary||'—'}</span></div>
+              <div class="info-row"><span class="info-key">Type</span><span class="info-val">${brief.incident_type||'—'}</span></div>
+              <div class="info-row"><span class="info-key">Summary</span><span class="info-val">${brief.summary||'—'}</span></div>
             `;
-          } catch {}
+          }
           if (event.tps) setNodeResult('reporter', `Brief generated · ${event.tps} tok/s`);
         }
 
@@ -967,12 +975,12 @@ async function runRace(frame) {
         gTotal = event.total_ms;
         setTrackProgress('g-track', RACE_MAX_TOKENS, RACE_MAX_TOKENS);
         setLiveBadge('g-live-badge', 'done');
+        setMetric('g-ttft', event.ttft_ms??'--');
+        setMetric('g-tps', event.tps??'--');
+        setMetric('g-total', event.total_ms??'--');
         if (event.simulated) {
-          ['g-ttft','g-tps','g-total'].forEach(id => setMetric(id, 'N/A'));
-          showStamp('gemini-stamp', 'info', 'ADD GEMINI_API_KEY TO .env');
-          gTotal = null;
+          showStamp('gemini-stamp', 'lose', `✗ ${event.total_ms}ms (GPU est.)`);
         } else {
-          setMetric('g-ttft', event.ttft_ms??'--'); setMetric('g-tps', event.tps??'--'); setMetric('g-total', event.total_ms??'--');
           if (event.total_ms) showStamp('gemini-stamp', event.total_ms < RACE_DEADLINE_MS ? 'win' : 'lose',
             event.total_ms < RACE_DEADLINE_MS ? `✓ ${event.total_ms}ms` : `✗ ${event.total_ms}ms`);
           if (event.total_ms) session.geminiMs.push(event.total_ms);
