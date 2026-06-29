@@ -1710,3 +1710,107 @@ body {
 ═══════════════════════════════════════════════ */
 .dispatch-card { padding: 12px 14px; }
 .dc-label { font-size: 9px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--t3); margin-bottom: 8px; font-family: var(--fm); }
+
+/* ═══════════════════════════════════════════════
+   RESPONSE-TIME COMPARISON BLOCK
+═══════════════════════════════════════════════ */
+.resp-time-cmp {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+}
+.rtc-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--t3);
+  font-family: var(--fm);
+  margin-bottom: 12px;
+}
+.rtc-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.rtc-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t2);
+  white-space: nowrap;
+}
+.rtc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rtc-sub {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--t4);
+  margin-left: 2px;
+}
+.rtc-bar-wrap {
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+.rtc-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.8s cubic-bezier(0.34,1.56,0.64,1);
+}
+.rtc-val {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--fm);
+  text-align: right;
+  white-space: nowrap;
+}
+.rtc-saving {
+  margin-top: 10px;
+  padding: 7px 10px;
+  background: rgba(16,185,129,0.1);
+  border: 1px solid rgba(16,185,129,0.25);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #10B981;
+  text-align: center;
+}
+.rtc-saving strong { font-weight: 700; }
+
+/* ── Response-time comparison: extra elements ── */
+.rtc-section-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--t3);
+  font-family: var(--fm);
+  margin-bottom: 10px;
+}
+.rtc-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 12px 0;
+}
+.rtc-speedup-badge {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.2);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--t2);
+  text-align: center;
+}
+.rtc-speedup-badge strong { color: #10B981; font-weight: 700; }

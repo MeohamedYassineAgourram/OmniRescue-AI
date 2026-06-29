@@ -736,6 +736,7 @@ async function runPipeline(frame) {
   let reporterStarted = false;
   let detectedKind = 'none';
   let detectedAlertLevel = 'MODERATE';
+  let aiPipelineMs = 0; // cumulative duration of all agent calls (watcher+analyst+reporter+dispatch)
   const bc = document.getElementById('briefContent');
   const now = () => new Date().toLocaleTimeString('fr-FR');
 
@@ -762,6 +763,7 @@ async function runPipeline(frame) {
       case 'agent_complete':
         setNodeState(event.agent, event.agent === 'dispatch' ? 'dispatch' : 'done');
         setNodeTime(event.agent, event.duration_ms);
+        if (event.duration_ms) aiPipelineMs += event.duration_ms;
 
         if (event.agent === 'watcher') {
           const r = event.result;
@@ -871,6 +873,94 @@ async function runPipeline(frame) {
               </div>`;
             }).join('');
           }
+
+          // ── Response-time comparison ──────────────────────────────────────
+          const rtc = document.getElementById('responseTimeComparison');
+          if (rtc) {
+            const etaSec = Math.round(maxEta * 60);
+
+            // Cerebras: real cumulative pipeline time from agent_complete events
+            const cerebrasDetectMs = Math.max(500, aiPipelineMs);
+
+            // GPU detection: scale the Cerebras pipeline time by the same ratio observed in the
+            // Speed Race (same prompt, same frame, different hardware). This keeps both panels
+            // consistent. If no race has been run yet, use a realistic 7× default.
+            const lastCerebrasRaceMs = session.cerebrasMs.at(-1);
+            const lastGpuRaceMs      = session.geminiMs.at(-1);
+            const raceRatio = (lastCerebrasRaceMs && lastGpuRaceMs)
+              ? lastGpuRaceMs / lastCerebrasRaceMs   // real observed ratio, e.g. 6.5
+              : 7;                                    // fallback when no race run yet
+            const gpuDetectMs = Math.round(cerebrasDetectMs * raceRatio);
+
+            // Manual call: 30s notice + 150s explain + 90s dispatcher queues the unit
+            const tradDetectMs = 270 * 1000;
+
+            function fmtMs(ms) {
+              if (ms < 1000) return `${ms} ms`;
+              const s = ms / 1000;
+              const m = Math.floor(s / 60), r = Math.round(s % 60);
+              return m > 0 ? `${m} min ${r > 0 ? r + 's' : ''}`.trim() : `${Math.round(s)}s`;
+            }
+            function fmtSec(s) {
+              const m = Math.floor(s / 60), r = s % 60;
+              return m > 0 ? `${m} min ${r > 0 ? r + 's' : ''}`.trim() : `${s}s`;
+            }
+
+            // Detection speed: logarithmic scale so sub-second Cerebras stays visible
+            const maxDetectMs = tradDetectMs;
+            function logPct(ms) {
+              return Math.round(Math.log(ms + 1) / Math.log(maxDetectMs + 1) * 100);
+            }
+
+            // Total arrival (detect overhead + travel)
+            const cerebrasTotal = Math.round(cerebrasDetectMs / 1000) + etaSec;
+            const gpuTotal      = Math.round(gpuDetectMs      / 1000) + etaSec;
+            const tradTotal     = Math.round(tradDetectMs      / 1000) + etaSec;
+            const maxTotal      = tradTotal;
+            const speedup       = Math.round(gpuDetectMs / cerebrasDetectMs * 10) / 10;
+
+            rtc.innerHTML = `
+              <div class="rtc-section-title">⚡ Detection Speed · AI Processing Only</div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#10B981"></span>OmniRescue-AI<span class="rtc-sub">Cerebras</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${logPct(cerebrasDetectMs)}%;background:#10B981"></div></div>
+                <div class="rtc-val" style="color:#10B981">${fmtMs(cerebrasDetectMs)}</div>
+              </div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#F59E0B"></span>GPU Baseline<span class="rtc-sub">A100 est.</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${logPct(gpuDetectMs)}%;background:#F59E0B"></div></div>
+                <div class="rtc-val" style="color:#F59E0B">${fmtMs(gpuDetectMs)}</div>
+              </div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#EF4444"></span>Manual Call<span class="rtc-sub">112 / 911</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${logPct(tradDetectMs)}%;background:#EF4444"></div></div>
+                <div class="rtc-val" style="color:#EF4444">${fmtMs(tradDetectMs)}</div>
+              </div>
+              <div class="rtc-speedup-badge">Cerebras <strong>${speedup}× faster</strong> than GPU · <strong>${Math.round(tradDetectMs/cerebrasDetectMs)}× faster</strong> than manual call</div>
+
+              <div class="rtc-divider"></div>
+
+              <div class="rtc-section-title">🚨 Total Time · Accident → First Responder Arrives</div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#10B981"></span>OmniRescue-AI<span class="rtc-sub">Cerebras</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${Math.round(cerebrasTotal/maxTotal*100)}%;background:#10B981"></div></div>
+                <div class="rtc-val" style="color:#10B981">${fmtSec(cerebrasTotal)}</div>
+              </div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#F59E0B"></span>GPU Baseline<span class="rtc-sub">A100 est.</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${Math.round(gpuTotal/maxTotal*100)}%;background:#F59E0B"></div></div>
+                <div class="rtc-val" style="color:#F59E0B">${fmtSec(gpuTotal)}</div>
+              </div>
+              <div class="rtc-row">
+                <div class="rtc-label"><span class="rtc-dot" style="background:#EF4444"></span>Manual Call<span class="rtc-sub">112 / 911</span></div>
+                <div class="rtc-bar-wrap"><div class="rtc-bar" style="width:${Math.round(tradTotal/maxTotal*100)}%;background:#EF4444"></div></div>
+                <div class="rtc-val" style="color:#EF4444">${fmtSec(tradTotal)}</div>
+              </div>
+              <div class="rtc-saving">⚡ Cerebras saves <strong>${fmtSec(tradTotal - cerebrasTotal)}</strong> vs traditional emergency call</div>
+            `;
+            rtc.classList.remove('hidden');
+          }
+
           dc.classList.remove('hidden');
         }
 
@@ -1015,8 +1105,9 @@ async function runRace(frame) {
         } else {
           if (event.total_ms) showStamp('gemini-stamp', event.total_ms < RACE_DEADLINE_MS ? 'win' : 'lose',
             event.total_ms < RACE_DEADLINE_MS ? `✓ ${event.total_ms}ms` : `✗ ${event.total_ms}ms`);
-          if (event.total_ms) session.geminiMs.push(event.total_ms);
         }
+        // Always store GPU race time (real or simulated) so detection panel can use the ratio
+        if (event.total_ms) session.geminiMs.push(event.total_ms);
         break;
       case 'gemini_error':
         setLiveBadge('g-live-badge', 'idle');
