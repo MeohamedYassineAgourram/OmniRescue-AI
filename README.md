@@ -277,10 +277,6 @@ OmniRescue-AI/
   </a>
 </p>
 
-<p align="center">
-  <a href="YOUR_VIDEO_URL_HERE">▶ Watch the 60-second demo</a>
-</p>
-
 ## ⚠️ Important Note
 
 OmniRescue-AI is a technical prototype built for a hackathon. It is not a certified emergency dispatch system. Unit positions, ETAs, and routing are approximations based on static coordinates and public map data. The GPU baseline comparison uses a simulation when the OpenRouter free tier is rate-limited. Do not use this system to make real emergency dispatch decisions.
