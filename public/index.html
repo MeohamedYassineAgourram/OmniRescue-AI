@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AeroSwarm AI — Emergency Response</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══════════════ SIDEBAR ══════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">⬡</div>
+    <div class="logo-text">
+      <span class="logo-name">AeroSwarm</span>
+      <span class="logo-tag">Emergency AI</span>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item active" data-view="incidents"><span class="nav-ic">🚨</span><span class="nav-lb">Incidents</span></a>
+    <a class="nav-item" data-view="dispatch"><span class="nav-ic">🚁</span><span class="nav-lb">Dispatch</span></a>
+    <a class="nav-item" data-view="analytics"><span class="nav-ic">📊</span><span class="nav-lb">Analytics</span></a>
+    <a class="nav-item" data-view="history"><span class="nav-ic">🗂</span><span class="nav-lb">History</span></a>
+  </nav>
+
+  <div class="sidebar-sep"></div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item" data-view="notifications"><span class="nav-ic">🔔</span><span class="nav-lb">Notifications</span><span class="nav-badge" id="notif-badge">3</span></a>
+    <a class="nav-item" data-view="chat"><span class="nav-ic">💬</span><span class="nav-lb">Chat</span><span class="nav-badge" id="chat-badge">5</span></a>
+    <a class="nav-item" data-view="tutorial"><span class="nav-ic">🎓</span><span class="nav-lb">Tutorial</span></a>
+    <a class="nav-item" data-view="help"><span class="nav-ic">❓</span><span class="nav-lb">Help center</span></a>
+  </nav>
+
+  <div class="sidebar-user">
+    <div class="sidebar-avatar">AI</div>
+    <div class="sidebar-user-info">
+      <span class="sidebar-user-name">AeroSwarm</span>
+      <span class="sidebar-user-role">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusLabel">READY</span>
+      </span>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════ CENTER PANEL ══════════════ -->
+<div class="center-panel">
+
+  <!-- ── VIEW: INCIDENTS ──────────────────── -->
+  <div class="view active" id="view-incidents">
+
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Incident Detection</h2>
+        <div class="cp-sub">Upload any surveillance media — AI detects and dispatches automatically</div>
+      </div>
+      <div class="cp-header-right">
+        <span class="status-chip" id="dangerTimer">● READY</span>
+        <button class="btn-icon-sm" id="resetBtn" title="Reset">↺</button>
+      </div>
+    </div>
+
+    <!-- Upload Zone -->
+    <div class="card" id="uploadZone">
+      <div class="upload-drop" id="dropZone">
+        <div class="upload-hex-icon">⬡</div>
+        <div class="upload-title">Drop Image or Video</div>
+        <div class="upload-body">Surveillance footage · dashcam · drone camera<br>AI auto-detects the accident type and sends the right rescue team</div>
+        <div class="upload-types">
+          <span>JPG</span><span>PNG</span><span>MP4</span><span>MOV</span><span>WEBM</span>
+        </div>
+        <label class="btn-upload-browse">
+          <input type="file" id="fileInput" accept="image/*,video/*">
+          Browse Files
+        </label>
+      </div>
+    </div>
+
+    <!-- Media View -->
+    <div class="card media-card hidden" id="mediaView">
+      <div class="media-container">
+        <img id="previewImg" class="preview-media hidden" alt="Uploaded scene">
+        <video id="previewVideo" class="preview-media hidden" muted playsinline></video>
+        <canvas id="captureCanvas" style="display:none" width="1280" height="720"></canvas>
+        <div class="bbox-overlay" id="bboxOverlay"></div>
+        <div class="scan-overlay" aria-hidden="true"></div>
+        <div class="capture-flash hidden" id="captureFlash"></div>
+        <div class="detection-stamp hidden" id="detectionStamp"></div>
+      </div>
+      <div class="vc-bar hidden" id="videoBar">
+        <button class="vc-btn" id="playPauseBtn">▶</button>
+        <div class="vc-scrubber-wrap"><input type="range" id="videoScrubber" class="vc-scrubber" min="0" max="1" step="0.001" value="0"></div>
+        <span class="vc-time" id="videoTime">0:00</span>
+        <button class="vc-capture-btn" id="captureFrameBtn">📸 Capture Frame</button>
+      </div>
+      <div class="analysis-bar" id="analysisBar"><div class="analysis-bar-fill" id="analysisBarFill"></div></div>
+      <div class="media-footer">
+        <div class="media-footer-left">
+          <span class="media-type-dot" id="mediaTypeDot">●</span>
+          <span class="media-name" id="mediaFilename">—</span>
+          <span class="frame-badge hidden" id="frameReadyBadge">✓ Ready</span>
+        </div>
+        <div class="media-footer-right">
+          <button class="btn-reanalyze hidden" id="runBtn">↻ Reanalyze</button>
+          <button class="btn-change" id="changeMediaBtn">↺ Change</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Pipeline -->
+    <div class="card pipeline-card">
+      <div class="card-hd">
+        <span class="card-hd-title">AI Pipeline</span>
+        <span class="card-hd-badge" id="pipelineTotalTime"></span>
+      </div>
+      <div class="pipeline-list">
+        <div class="pl-item" id="node-watcher" data-state="idle">
+          <div class="pl-dot-col"><div class="pl-dot"></div><div class="pl-connector"></div></div>
+          <div class="pl-body">
+            <div class="pl-head"><span class="pl-name">Watcher</span><span class="pl-tags"><span class="tag-pill">multimodal</span><span class="tag-pill">vision</span></span><span class="pl-time" id="watcher-time"></span></div>
+            <div class="pl-desc" id="watcher-result">Detection agent — awaiting upload</div>
+          </div>
+        </div>
+        <div class="pl-item" id="node-analyst" data-state="idle">
+          <div class="pl-dot-col"><div class="pl-dot"></div><div class="pl-connector"></div></div>
+          <div class="pl-body">
+            <div class="pl-head"><span class="pl-name">Analyst</span><span class="pl-tags"><span class="tag-pill">threat</span></span><span class="pl-time" id="analyst-time"></span></div>
+            <div class="pl-desc" id="analyst-result">Threat analysis — awaiting detection</div>
+          </div>
+        </div>
+        <div class="pl-item" id="node-reporter" data-state="idle">
+          <div class="pl-dot-col"><div class="pl-dot"></div><div class="pl-connector"></div></div>
+          <div class="pl-body">
+            <div class="pl-head"><span class="pl-name">Reporter</span><span class="pl-tags"><span class="tag-pill">streaming</span><span class="tag-pill">JSON</span></span><span class="pl-time" id="reporter-time"></span></div>
+            <div class="pl-desc" id="reporter-result">Incident brief — awaiting analysis</div>
+          </div>
+        </div>
+        <div class="pl-item" id="node-dispatch" data-state="idle">
+          <div class="pl-dot-col"><div class="pl-dot"></div></div>
+          <div class="pl-body">
+            <div class="pl-head"><span class="pl-name">Dispatch</span><span class="pl-tags"><span class="tag-pill">deterministic</span></span><span class="pl-time" id="dispatch-time"></span></div>
+            <div class="pl-desc" id="dispatch-result">Rescue dispatch — awaiting brief</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Speed Race -->
+    <div class="card race-card">
+      <div class="card-hd">
+        <span class="card-hd-title">⚡ Speed Race</span>
+        <span class="race-subtitle">same frame · two providers</span>
+        <span class="race-verdict" id="raceVerdict"></span>
+      </div>
+      <div class="race-tracks">
+        <div class="race-track-row">
+          <span class="track-lbl cerebras-lbl">CEREBRAS</span>
+          <div class="track-bg"><div class="track-fill cerebras-track" id="c-track"></div></div>
+          <span class="track-cnt cerebras-lbl" id="c-token-count">0 tok</span>
+        </div>
+        <div class="race-track-row">
+          <span class="track-lbl gpu-lbl">GPU BASE</span>
+          <div class="track-bg"><div class="track-fill gpu-track" id="g-track"></div></div>
+          <span class="track-cnt gpu-lbl" id="g-token-count">0 tok</span>
+        </div>
+      </div>
+      <div class="race-cols">
+        <div class="race-col cerebras-col">
+          <div class="race-col-hd">
+            <span class="provider-dot cerebras-dot"></span>
+            <div><div class="provider-name cerebras-name">CEREBRAS</div><div class="provider-model">gemma-4-31b</div></div>
+            <div class="live-badge" id="c-live-badge">IDLE</div>
+          </div>
+          <div class="metrics-row">
+            <div class="metric-box"><div class="metric-val cerebras-val" id="c-ttft">--</div><div class="metric-lbl">TTFT ms</div></div>
+            <div class="metric-box"><div class="metric-val cerebras-val" id="c-tps">--</div><div class="metric-lbl">tok/s</div></div>
+            <div class="metric-box"><div class="metric-val cerebras-val" id="c-total">--</div><div class="metric-lbl">total ms</div></div>
+          </div>
+          <div class="race-output" id="cerebras-output"><span class="race-placeholder">Awaiting upload…</span></div>
+          <div class="verdict-stamp hidden" id="cerebras-stamp"></div>
+        </div>
+        <div class="race-vs">VS</div>
+        <div class="race-col gpu-col">
+          <div class="race-col-hd">
+            <span class="provider-dot gpu-dot"></span>
+            <div><div class="provider-name gpu-name">GPU BASELINE</div><div class="provider-model" id="geminiModelLabel">gemini-2.0-flash</div></div>
+            <div class="live-badge gpu-badge-color" id="g-live-badge">IDLE</div>
+          </div>
+          <div class="metrics-row">
+            <div class="metric-box"><div class="metric-val gpu-val" id="g-ttft">--</div><div class="metric-lbl">TTFT ms</div></div>
+            <div class="metric-box"><div class="metric-val gpu-val" id="g-tps">--</div><div class="metric-lbl">tok/s</div></div>
+            <div class="metric-box"><div class="metric-val gpu-val" id="g-total">--</div><div class="metric-lbl">total ms</div></div>
+          </div>
+          <div class="race-output" id="gemini-output"><span class="race-placeholder">Awaiting upload…</span></div>
+          <div class="verdict-stamp hidden" id="gemini-stamp"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end view-incidents -->
+
+  <!-- ── VIEW: DISPATCH ──────────────────── -->
+  <div class="view hidden" id="view-dispatch">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Dispatch Center</h2>
+        <div class="cp-sub">All Paris emergency units · live status</div>
+      </div>
+      <div class="cp-header-right">
+        <span class="status-chip done">● 8 UNITS ONLINE</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">Active Units</span><span class="card-hd-badge" id="lastDispatchTime"></span></div>
+      <div class="unit-list" id="unitStatusList">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">Dispatch Log</span></div>
+      <div class="dispatch-log" id="dispatchLog">
+        <div class="log-empty">No dispatches yet this session</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: ANALYTICS ──────────────────── -->
+  <div class="view hidden" id="view-analytics">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Analytics</h2>
+        <div class="cp-sub">Session performance · AI model comparison</div>
+      </div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num" id="stat-scans">0</div><div class="stat-lbl">Total Scans</div></div>
+      <div class="stat-card accent"><div class="stat-num" id="stat-incidents">0</div><div class="stat-lbl">Incidents Detected</div></div>
+      <div class="stat-card green"><div class="stat-num" id="stat-clear">0</div><div class="stat-lbl">Scenes Clear</div></div>
+      <div class="stat-card red"><div class="stat-num" id="stat-dispatches">0</div><div class="stat-lbl">Units Dispatched</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">AI Speed Comparison</span></div>
+      <div class="speed-compare" id="speedCompare">
+        <div class="speed-row">
+          <span class="speed-label cerebras-lbl">CEREBRAS avg</span>
+          <div class="speed-bar-bg"><div class="speed-bar cerebras-track" id="cerebras-speed-bar" style="width:0%"></div></div>
+          <span class="speed-val cerebras-lbl" id="cerebras-avg-ms">—</span>
+        </div>
+        <div class="speed-row">
+          <span class="speed-label gpu-lbl">GPU BASE avg</span>
+          <div class="speed-bar-bg"><div class="speed-bar gpu-track" id="gpu-speed-bar" style="width:0%"></div></div>
+          <span class="speed-val gpu-lbl" id="gpu-avg-ms">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">Incident Type Breakdown</span></div>
+      <div class="breakdown-list" id="breakdownList">
+        <div class="breakdown-row"><span class="breakdown-icon">🌊</span><span class="breakdown-lbl">Person in water / distress</span><span class="breakdown-cnt" id="kind-person_in_distress">0</span></div>
+        <div class="breakdown-row"><span class="breakdown-icon">🚗</span><span class="breakdown-lbl">Vehicle accident</span><span class="breakdown-cnt" id="kind-vehicle_accident">0</span></div>
+        <div class="breakdown-row"><span class="breakdown-icon">🔥</span><span class="breakdown-lbl">Fire</span><span class="breakdown-cnt" id="kind-fire">0</span></div>
+        <div class="breakdown-row"><span class="breakdown-icon">🌊</span><span class="breakdown-lbl">Flooding</span><span class="breakdown-cnt" id="kind-flooding">0</span></div>
+        <div class="breakdown-row"><span class="breakdown-icon">🏥</span><span class="breakdown-lbl">Multiple casualties</span><span class="breakdown-cnt" id="kind-multiple_casualties">0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: HISTORY ──────────────────── -->
+  <div class="view hidden" id="view-history">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Incident History</h2>
+        <div class="cp-sub">Session log — resets on page reload</div>
+      </div>
+      <div class="cp-header-right">
+        <span class="status-chip" id="history-count-chip">0 incidents</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">Incident Log</span></div>
+      <div class="history-table-wrap">
+        <table class="history-table">
+          <thead><tr><th>Time</th><th>Kind</th><th>Unit Dispatched</th><th>ETA</th><th>Alert</th></tr></thead>
+          <tbody id="historyTableBody"><tr><td colspan="5" class="history-empty">No incidents recorded yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: NOTIFICATIONS ──────────────────── -->
+  <div class="view hidden" id="view-notifications">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Notifications</h2>
+        <div class="cp-sub">System alerts and incident updates</div>
+      </div>
+      <div class="cp-header-right">
+        <button class="btn-icon-sm" id="clearNotifBtn" title="Mark all read">✓</button>
+      </div>
+    </div>
+    <div class="notif-list" id="notifList">
+      <div class="notif-item notif-system">
+        <div class="notif-icon">✅</div>
+        <div class="notif-body">
+          <div class="notif-title">System Online</div>
+          <div class="notif-desc">AeroSwarm AI connected · Cerebras + Gemini APIs active</div>
+          <div class="notif-time">Just now</div>
+        </div>
+      </div>
+      <div class="notif-item notif-system">
+        <div class="notif-icon">🗺</div>
+        <div class="notif-body">
+          <div class="notif-title">8 Paris Units Active</div>
+          <div class="notif-desc">HÉLICO-1, MARINE-7, MARINE-3, SAMU-75, SAMU-14, BSPP-8, POLICE-17, POLICE-16</div>
+          <div class="notif-time">Just now</div>
+        </div>
+      </div>
+      <div class="notif-item notif-system">
+        <div class="notif-icon">🤖</div>
+        <div class="notif-body">
+          <div class="notif-title">AI Models Loaded</div>
+          <div class="notif-desc">Gemma 4 31B on Cerebras · Gemini 2.0 Flash as baseline</div>
+          <div class="notif-time">Just now</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: CHAT ──────────────────── -->
+  <div class="view hidden" id="view-chat">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Responder Chat</h2>
+        <div class="cp-sub">AeroSwarm Command · Paris Emergency Network</div>
+      </div>
+    </div>
+    <div class="card chat-card">
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-msg system">
+          <div class="chat-avatar">HQ</div>
+          <div class="chat-bubble">
+            <div class="chat-name">Dispatch HQ</div>
+            <div class="chat-text">All units online. AeroSwarm AI surveillance active across Paris. Awaiting incident detection.</div>
+            <div class="chat-time">Now</div>
+          </div>
+        </div>
+        <div class="chat-msg system">
+          <div class="chat-avatar">HQ</div>
+          <div class="chat-bubble">
+            <div class="chat-name">Dispatch HQ</div>
+            <div class="chat-text">HÉLICO-1 confirmed airborne and on standby at Issy-les-Moulineaux. MARINE-7 patrol route: Bercy → Île de la Cité.</div>
+            <div class="chat-time">Now</div>
+          </div>
+        </div>
+        <div class="chat-msg system">
+          <div class="chat-avatar">HQ</div>
+          <div class="chat-bubble">
+            <div class="chat-name">Dispatch HQ</div>
+            <div class="chat-text">BSPP-8 (Madeleine) and SAMU-14 (Lariboisière) confirmed on standby. Response corridor Champs-Élysées to Arc de Triomphe monitored.</div>
+            <div class="chat-time">Now</div>
+          </div>
+        </div>
+        <div class="chat-msg system">
+          <div class="chat-avatar">AI</div>
+          <div class="chat-bubble">
+            <div class="chat-name">AeroSwarm AI</div>
+            <div class="chat-text">Surveillance systems nominal. Upload any image or video to begin incident detection. I will automatically alert the appropriate rescue team.</div>
+            <div class="chat-time">Now</div>
+          </div>
+        </div>
+        <div class="chat-msg system">
+          <div class="chat-avatar">🚔</div>
+          <div class="chat-bubble">
+            <div class="chat-name">POLICE-17 (Batignolles)</div>
+            <div class="chat-text">Unit 17 patrol — 17th arr. All clear. Ready for immediate response.</div>
+            <div class="chat-time">Now</div>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <input class="chat-input" type="text" placeholder="Message responders…" readonly>
+        <button class="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: TUTORIAL ──────────────────── -->
+  <div class="view hidden" id="view-tutorial">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">How to Use AeroSwarm</h2>
+        <div class="cp-sub">4 steps to trigger an emergency dispatch</div>
+      </div>
+    </div>
+    <div class="tutorial-steps">
+      <div class="tut-step">
+        <div class="tut-num">1</div>
+        <div class="tut-body">
+          <div class="tut-title">Upload Surveillance Media</div>
+          <div class="tut-desc">Go to Incidents and drag-and-drop any image or video — dashcam footage, drone camera, CCTV screenshot. Supported formats: JPG, PNG, MP4, MOV, WEBM.</div>
+        </div>
+      </div>
+      <div class="tut-step">
+        <div class="tut-num">2</div>
+        <div class="tut-body">
+          <div class="tut-title">AI Auto-Detects the Incident</div>
+          <div class="tut-desc">The Watcher agent (Gemma 4 on Cerebras) analyzes the image using multimodal AI. It detects: drowning, vehicle accidents, fires, flooding, and casualties — no manual selection needed.</div>
+        </div>
+      </div>
+      <div class="tut-step">
+        <div class="tut-num">3</div>
+        <div class="tut-body">
+          <div class="tut-title">Nearest Appropriate Unit Dispatched</div>
+          <div class="tut-desc">The system automatically determines which rescue type is needed and dispatches the nearest eligible unit. Water rescue → MARINE or HÉLICO. Road accident → BSPP, SAMU, or POLICE. Each gets a full incident brief before arrival.</div>
+        </div>
+      </div>
+      <div class="tut-step">
+        <div class="tut-num">4</div>
+        <div class="tut-body">
+          <div class="tut-title">Track on Paris Map</div>
+          <div class="tut-desc">The Paris map shows all 8 units in real time. When dispatched, the unit marker turns gold and a route line appears. The tracking panel shows Detection → Analysis → Dispatch timeline with timestamps.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">For Videos</span></div>
+      <div style="padding:12px 14px;font-size:12px;color:var(--t2);line-height:1.6">
+        Load the video → scrub to the moment of the accident → click <strong>📸 Capture Frame</strong> → AI automatically analyzes the frame and dispatches the right rescue team. No manual scene selection required.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── VIEW: HELP ──────────────────── -->
+  <div class="view hidden" id="view-help">
+    <div class="cp-header">
+      <div class="cp-header-left">
+        <h2 class="cp-title">Help Center</h2>
+        <div class="cp-sub">About AeroSwarm AI · FAQ</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-hd-title">About AeroSwarm AI</span></div>
+      <div style="padding:12px 14px;font-size:12px;color:var(--t2);line-height:1.7">
+        AeroSwarm is a multi-agent AI emergency response system built for the <strong>Cerebras × Google DeepMind Gemma 4 Hackathon</strong>. It uses a 4-agent pipeline — Watcher, Analyst, Reporter, Dispatch — powered by <strong>Gemma 4 31B running on Cerebras</strong> inference hardware. Images are analyzed in seconds, the right rescue team is identified, and a detailed incident brief is transmitted before the unit arrives.
+      </div>
+    </div>
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="faq-q">What incident types can AeroSwarm detect?</div>
+        <div class="faq-a">Person in water (drowning / capsized vessel), vehicle accident (collision, pileup, pedestrian struck), fire or smoke, flooding, and mass casualty events.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">How does it pick the right rescue team?</div>
+        <div class="faq-a">The Watcher AI classifies the incident kind. A deterministic dispatch engine then filters the 8 Paris units to only those capable of responding (e.g. water rescue for drowning), and sends the nearest one using Haversine distance calculation.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">What are the 8 active Paris units?</div>
+        <div class="faq-a">HÉLICO-1 (air rescue, Issy), MARINE-7 (water rescue, Bercy), MARINE-3 (water rescue, Levallois), SAMU-75 (ambulance, Hôtel-Dieu), SAMU-14 (ambulance, Lariboisière), BSPP-8 (fire brigade, Madeleine), POLICE-17 (police, Batignolles), POLICE-16 (police, Boulogne).</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">What is the Speed Race panel?</div>
+        <div class="faq-a">It runs the same image simultaneously through Cerebras (Gemma 4) and Google Gemini (GPU baseline) to compare inference speed. Cerebras typically responds 3–10× faster thanks to its custom silicon architecture.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end center-panel -->
+
+<!-- ══════════════ MAP PANEL ══════════════ -->
+<div class="map-panel">
+  <div class="map-ctrl-bar">
+    <button class="map-ctrl active" id="mapCtrlStreet">Map</button>
+    <button class="map-ctrl" id="mapCtrlSatellite">Satellite</button>
+    <button class="map-ctrl" id="mapCtrlLayers">⊞ Layers</button>
+  </div>
+  <div id="leafletMap"></div>
+  <div class="alert-panel hidden" id="alertPanel">
+    <div class="ap-header">
+      <div class="ap-header-top">
+        <div class="ap-incident-no" id="alertIncidentNo">No: #—</div>
+        <div class="ap-actions">
+          <button class="ap-action-btn" title="Copy">⎘</button>
+          <button class="ap-action-btn" title="Edit">✎</button>
+          <button class="ap-action-btn ap-close" id="alertPanelClose">✕</button>
+        </div>
+      </div>
+      <div class="ap-tabs">
+        <button class="ap-tab" id="tabInfo">Load info</button>
+        <button class="ap-tab active" id="tabTracking">Tracking</button>
+        <button class="ap-tab" id="tabDocs">Brief</button>
+      </div>
+    </div>
+    <div class="ap-body" id="apTracking">
+      <div class="ap-timeline">
+        <div class="tl-item" id="tl-detect">
+          <div class="tl-dot tl-dot-blue"></div>
+          <div class="tl-content">
+            <div class="tl-title">Detection</div>
+            <div class="tl-addr" id="tl-detect-desc">Awaiting analysis…</div>
+            <div class="tl-time" id="tl-detect-time"></div>
+          </div>
+        </div>
+        <div class="tl-item" id="tl-analyze">
+          <div class="tl-dot tl-dot-blue"></div>
+          <div class="tl-content">
+            <div class="tl-title">Threat Analysis</div>
+            <div class="tl-addr" id="tl-analyze-desc">Awaiting detection…</div>
+            <div class="tl-time" id="tl-analyze-time"></div>
+          </div>
+        </div>
+        <div class="tl-item" id="tl-dispatch">
+          <div class="tl-dot tl-dot-gray"></div>
+          <div class="tl-content">
+            <div class="tl-title">Dispatched</div>
+            <div class="tl-addr" id="tl-dispatch-desc">Awaiting brief…</div>
+            <div class="tl-time" id="tl-dispatch-time"></div>
+          </div>
+        </div>
+      </div>
+      <div class="dispatch-card hidden" id="dispatchCard">
+        <div class="dc-label">Responding Unit</div>
+        <div class="dc-unit" id="dcUnit">—</div>
+        <div class="dc-meta"><span id="dcEta">— min ETA</span><span class="dc-sep">·</span><span id="dcDist">— km</span></div>
+      </div>
+    </div>
+    <div class="ap-body hidden" id="apBrief">
+      <div class="brief-content" id="briefContent">
+        <div class="brief-ph"><div class="brief-ph-icon">📋</div><div>Brief appears after analysis</div></div>
+      </div>
+    </div>
+    <div class="ap-body hidden" id="apInfo">
+      <div class="info-grid" id="infoGrid"><div class="info-ph">No incident data yet</div></div>
+    </div>
+  </div>
+  <div class="clear-banner hidden" id="clearBanner">
+    <span class="clear-icon">✓</span>
+    <span>Scene Clear — No incident detected</span>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
