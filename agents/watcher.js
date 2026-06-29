@@ -3,7 +3,7 @@
 const cerebras = require('../lib/cerebras');
 const { getScenario } = require('../lib/scenarios');
 
-const SYSTEM = `You are AeroSwarm Watcher, an emergency-detection AI for Paris surveillance cameras.
+const SYSTEM = `You are OmniRescue Watcher, an emergency-detection AI for Paris surveillance cameras.
 Analyze the frame and return a single JSON object — nothing else. No markdown, no code fences, no prose before or after.`;
 
 async function analyze(base64, scenarioName = 'paris') {

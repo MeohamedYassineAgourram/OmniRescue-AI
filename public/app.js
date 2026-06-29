@@ -289,7 +289,26 @@ function placeUnitMarkers(dispatchedIds, dispatchedUnitsMap = {}) {
   });
 }
 
-function updateMapForDispatch(dispatchResult) {
+// Fetch a real road route from the public OSRM API.
+// Air/water units travel off-road — return null so caller falls back to straight line.
+async function fetchRoadRoute(fromLat, fromLng, toLat, toLng, unitType) {
+  if (unitType === 'air_rescue') return null; // helicopters fly direct
+  const profile = unitType === 'water_rescue' ? 'driving' : 'driving'; // boats routed by road for now
+  try {
+    const url = `https://router.project-osrm.org/route/v1/${profile}/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const route = data.routes?.[0];
+    if (!route) return null;
+    // GeoJSON uses [lng, lat] — convert to Leaflet [lat, lng]
+    return route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  } catch {
+    return null;
+  }
+}
+
+async function updateMapForDispatch(dispatchResult) {
   // Remove old incident marker + all routes
   if (mapLayers.incident) { try { leafletMap.removeLayer(mapLayers.incident); } catch {} }
   mapLayers.routes.forEach(l => { try { leafletMap.removeLayer(l); } catch {} });
@@ -304,35 +323,45 @@ function updateMapForDispatch(dispatchResult) {
   ).openPopup();
 
   // Build lookup maps for dispatched units
-  const dispatchedIds  = new Set(dispatchResult.units.map(u => u.id));
-  const dispatchedMap  = {};
+  const dispatchedIds = new Set(dispatchResult.units.map(u => u.id));
+  const dispatchedMap = {};
   dispatchResult.units.forEach(u => { dispatchedMap[u.id] = u; });
 
   // Re-render all unit markers (dispatched ones glow in their type color)
   placeUnitMarkers(dispatchedIds, dispatchedMap);
 
-  // Draw one colored route line per dispatched unit
   const allPoints = [[inc.lat, inc.lng]];
 
-  dispatchResult.units.forEach(unit => {
+  // Draw routes in parallel — road routes from OSRM, straight lines for air units
+  await Promise.all(dispatchResult.units.map(async unit => {
     const clientUnit = ALL_PARIS_UNITS.find(u => u.id === unit.id) || unit;
     const color = ROUTE_COLORS[unit.type] || '#94A3B8';
 
-    const line = L.polyline(
-      [[clientUnit.lat, clientUnit.lng], [inc.lat, inc.lng]],
-      { color, weight: 3.5, dashArray: '9 6', opacity: 0.88 }
-    ).addTo(leafletMap);
+    // Try real road route; air_rescue gets null → straight dashed line
+    let coords = await fetchRoadRoute(clientUnit.lat, clientUnit.lng, inc.lat, inc.lng, unit.type);
+    const isAir = unit.type === 'air_rescue';
+    if (!coords) coords = [[clientUnit.lat, clientUnit.lng], [inc.lat, inc.lng]];
 
+    const line = L.polyline(coords, {
+      color,
+      weight:    isAir ? 2.5 : 4.5,
+      opacity:   0.92,
+      dashArray: isAir ? '6 8' : null,   // dashed for helicopter, solid for road
+      lineJoin:  'round',
+      lineCap:   'round'
+    }).addTo(leafletMap);
+
+    const tipIcon = clientUnit.icon || { air_rescue:'🚁', water_rescue:'🚤', ambulance:'🚑', fire:'🚒', police:'🚔' }[unit.type] || '🚨';
     line.bindTooltip(
-      `${unit.icon} ${unit.label}<br>ETA ${unit.etaMin} min · ${unit.distKm} km`,
+      `${tipIcon} ${unit.label}<br>ETA ${unit.etaMin} min · ${unit.distKm} km`,
       { sticky: true }
     );
 
     mapLayers.routes.push(line);
     allPoints.push([clientUnit.lat, clientUnit.lng]);
-  });
+  }));
 
-  // Fit map to encompass incident + all responding units
+  // Fit map to show incident + all responding units
   if (allPoints.length > 1) {
     leafletMap.fitBounds(L.latLngBounds(allPoints).pad(0.28));
   }
@@ -826,11 +855,14 @@ async function runPipeline(frame) {
         if (dc) {
           const grid = document.getElementById('dcUnitsGrid');
           if (grid) {
+            const TYPE_ICON = { air_rescue:'🚁', water_rescue:'🚤', ambulance:'🚑', fire:'🚒', police:'🚔' };
             grid.innerHTML = r.units.map(unit => {
-              const color = ROUTE_COLORS[unit.type] || '#94A3B8';
+              const color     = ROUTE_COLORS[unit.type] || '#94A3B8';
               const roleLabel = unit.role === 'primary' ? '★ Primary' : '↺ Support';
+              const clientU   = ALL_PARIS_UNITS.find(u => u.id === unit.id);
+              const icon      = clientU?.icon || TYPE_ICON[unit.type] || '🚨';
               return `<div class="dc-unit-row" style="border-left:3px solid ${color}">
-                <span class="du-icon">${unit.icon}</span>
+                <span class="du-icon">${icon}</span>
                 <div class="du-info">
                   <div class="du-name">${unit.label}</div>
                   <div class="du-meta">${unit.etaMin} min ETA · ${unit.distKm} km</div>

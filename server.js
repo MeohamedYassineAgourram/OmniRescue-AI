@@ -207,7 +207,7 @@ app.get('/api/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🚁 AeroSwarm AI running → http://localhost:${PORT}\n`);
+  console.log(`\n🚁 OmniRescue-AI running → http://localhost:${PORT}\n`);
   console.log(`  Cerebras key : ${process.env.CEREBRAS_API_KEY ? '✓ set' : '✗ MISSING — add to .env'}`);
   console.log(`  Gemini key   : ${process.env.GEMINI_API_KEY  ? '✓ set' : '○ not set (race baseline shows placeholder)'}`);
   console.log('');

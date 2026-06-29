@@ -3,7 +3,7 @@
 const cerebras = require('../lib/cerebras');
 const { getScenario } = require('../lib/scenarios');
 
-const SYSTEM = `You are AeroSwarm Analyst — tactical threat assessment AI.
+const SYSTEM = `You are OmniRescue Analyst — tactical threat assessment AI.
 You receive detection reports and produce razor-sharp situation assessments for rescue commanders.
 Write 3 tight sentences maximum. Be clinical and action-oriented.
 Focus on: severity, immediate life risk, complicating factors, what responders must know.
