@@ -1,6 +1,7 @@
 'use strict';
 
 const { getScenario } = require('../lib/scenarios');
+const { getLocation }  = require('../lib/locations');
 
 const UNIT_SPEEDS_KMH = {
   air_rescue:   240,
@@ -10,75 +11,104 @@ const UNIT_SPEEDS_KMH = {
   police:        90
 };
 
-// Deterministic mapping: incident kind → only eligible unit types.
-// Each kind has exactly one primary type so the correct specialist always wins,
-// regardless of which unit happens to be geographically closest overall.
-const KIND_TO_UNIT_TYPES = {
-  person_in_distress:  ['water_rescue', 'air_rescue'],  // drowning → marine/helicopter ONLY
-  vehicle_accident:    ['police'],                       // road accident → police first on scene
-  fire:                ['fire'],                         // fire → brigade ONLY, SAMU comes after
-  flooding:            ['water_rescue', 'air_rescue'],  // flood → marine/helicopter ONLY
-  multiple_casualties: ['ambulance'],                   // mass casualty → SAMU medical team
-  none:                ['ambulance']                    // safe fallback
+// Unit type → display color (used by client for route lines)
+const UNIT_TYPE_COLORS = {
+  air_rescue:   '#F5C518',
+  water_rescue: '#0EA5E9',
+  ambulance:    '#10B981',
+  fire:         '#EF4444',
+  police:       '#8B5CF6'
 };
 
-// Large km-equivalent penalty for sending the wrong unit type.
-// 50 km means an appropriate unit up to 50 km away beats any inappropriate unit.
-const WRONG_TYPE_PENALTY_KM = 50;
+// Multi-unit dispatch rules per incident kind.
+// primary   = mission-critical specialists dispatched first
+// secondary = always added for coordination/support
+const DISPATCH_RULES = {
+  person_in_distress:  { primary: ['water_rescue'],         secondary: ['police'] },
+  vehicle_accident:    { primary: ['ambulance'],            secondary: ['police'] },
+  fire:                { primary: ['fire'],                 secondary: ['police'] },
+  flooding:            { primary: ['water_rescue'],         secondary: ['police'] },
+  multiple_casualties: { primary: ['ambulance', 'fire'],    secondary: ['police'] },
+  none:                { primary: ['ambulance'],            secondary: [] }
+};
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function nearestOfType(type, units, iLat, iLng, usedIds) {
+  return units
+    .filter(u => u.type === type && !usedIds.has(u.id))
+    .map(u => {
+      const distKm = haversineKm(iLat, iLng, u.lat, u.lng);
+      const etaMin = (distKm / (UNIT_SPEEDS_KMH[u.type] || 60)) * 60;
+      return { ...u, distKm, etaMin };
+    })
+    .sort((a, b) => a.distKm - b.distKm)[0] || null;
 }
 
 /**
- * @param {object} reporterResult  - The reporter's parsed JSON brief
- * @param {string} scenarioName    - 'aerial' | 'traffic'
- * @param {string} watcherKind     - The kind detected by the Watcher agent
- *                                   ('person_in_distress' | 'vehicle_accident' | 'fire' | ...)
+ * Build the list of unit types to dispatch given kind + terrain.
+ * Forest/remote → water_rescue → air_rescue (helicopters can reach anywhere).
+ * Water mass casualty → prepend water_rescue to the primary list.
  */
-function findNearest(reporterResult, scenarioName = 'aerial', watcherKind = 'none') {
+function resolveTypes(kind, terrain) {
+  const rule = DISPATCH_RULES[kind] || DISPATCH_RULES.none;
+  let primary   = [...rule.primary];
+  const secondary = [...rule.secondary];
+
+  if (terrain === 'forest' || terrain === 'remote') {
+    // Boats can't operate in forests — replace water units with helicopter
+    primary = primary.map(t => t === 'water_rescue' ? 'air_rescue' : t);
+    // If no air rescue in list yet, add it as lead unit
+    if (!primary.includes('air_rescue')) primary = ['air_rescue', ...primary];
+  } else if (terrain === 'water' && kind === 'multiple_casualties') {
+    // Boat sinking / mass water casualty → marine rescue takes priority
+    primary = ['water_rescue', ...primary.filter(t => t !== 'fire')];
+  }
+
+  return { primary, secondary };
+}
+
+/**
+ * Find and return ALL units that should respond, one per required type.
+ * Returns the full dispatch result with an array of units.
+ */
+function findDispatch(reporterResult, scenarioName = 'paris', watcherKind = 'none', watcherTerrain = 'road', locationHint = 'paris_center') {
   const scenario = getScenario(scenarioName);
-  const { lat: iLat, lng: iLng } = scenario.incident;
+  const location  = getLocation(locationHint);
+  const { lat: iLat, lng: iLng } = location;
 
-  // Determine appropriate unit types from the detected incident kind (deterministic).
-  // Fall back to reporter's recommended_unit hint only if kind is unknown.
-  const appropriateTypes = KIND_TO_UNIT_TYPES[watcherKind]
-    || (reporterResult.recommended_unit ? [reporterResult.recommended_unit] : ['ambulance']);
+  const { primary, secondary } = resolveTypes(watcherKind, watcherTerrain);
+  const allTypes  = [...new Set([...primary, ...secondary])];
 
-  const scored = scenario.units.map(unit => {
-    const distKm   = haversineKm(iLat, iLng, unit.lat, unit.lng);
-    const speed    = UNIT_SPEEDS_KMH[unit.type] || 60;
-    const etaMin   = (distKm / speed) * 60;
+  const dispatched = [];
+  const usedIds    = new Set();
 
-    // isAppropriate: is this unit type in the approved list for this incident kind?
-    const isAppropriate = appropriateTypes.includes(unit.type);
-
-    // Score = distance + penalty for wrong type.
-    // Appropriate units compete purely on proximity; wrong-type units only win
-    // if there is literally no appropriate unit within WRONG_TYPE_PENALTY_KM km.
-    const score = (isAppropriate ? 0 : WRONG_TYPE_PENALTY_KM) + distKm;
-
-    return { ...unit, distKm, etaMin, typeMatch: isAppropriate, score };
-  });
-
-  scored.sort((a, b) => a.score - b.score);
-  const dispatched = scored[0];
+  for (const unitType of allTypes) {
+    const unit = nearestOfType(unitType, scenario.units, iLat, iLng, usedIds);
+    if (!unit) continue;
+    usedIds.add(unit.id);
+    dispatched.push({
+      ...unit,
+      distKm:  Math.round(unit.distKm * 100) / 100,
+      etaMin:  Math.round(unit.etaMin * 10)  / 10,
+      role:    primary.includes(unitType) ? 'primary' : 'support',
+      color:   UNIT_TYPE_COLORS[unit.type] || '#94A3B8'
+    });
+  }
 
   return {
-    unit:          dispatched,
-    incident:      scenario.incident,
+    units:         dispatched,
+    incident:      { lat: iLat, lng: iLng, name: location.name },
     incident_kind: watcherKind,
-    eta_minutes:   Math.round(dispatched.etaMin * 10) / 10,
-    distance_km:   Math.round(dispatched.distKm * 100) / 100,
-    all_units:     scored,
+    terrain:       watcherTerrain,
     dispatch_time: new Date().toISOString()
   };
 }
 
-module.exports = { findNearest };
+module.exports = { findDispatch, UNIT_TYPE_COLORS };

@@ -144,7 +144,8 @@ function renderHistoryView() {
     <tr>
       <td style="font-family:var(--fm);white-space:nowrap">${h.time}</td>
       <td>${KIND_LABELS[h.kind] || h.kind}</td>
-      <td style="font-weight:600;color:var(--t1)">${h.unit}</td>
+      <td style="font-weight:600;color:var(--t1);font-size:10px">${h.unit}</td>
+      <td style="font-size:10px;color:var(--t2)">${h.location||'—'}</td>
       <td style="font-family:var(--fm)">${h.eta} min</td>
       <td><span class="alert-badge-sm ${h.alertLevel}">${h.alertLevel}</span></td>
     </tr>`).join('');
@@ -222,9 +223,18 @@ function addDispatchLogEntry(unit, kind, eta, dist) {
 // ═══════════════════════════════════════════════════════════════════
 
 let leafletMap     = null;
-let mapLayers      = { incident: null, units: {}, route: null };
+let mapLayers      = { incident: null, units: {}, routes: [] };
 let streetLayer    = null;
 let satelliteLayer = null;
+
+// Route color per unit type — mirrors server-side UNIT_TYPE_COLORS
+const ROUTE_COLORS = {
+  air_rescue:   '#F5C518',
+  water_rescue: '#0EA5E9',
+  ambulance:    '#10B981',
+  fire:         '#EF4444',
+  police:       '#8B5CF6'
+};
 
 function initLeafletMap() {
   leafletMap = L.map('leafletMap', { center: [48.8580, 2.3300], zoom: 13, zoomControl: false });
@@ -240,60 +250,99 @@ function initLeafletMap() {
   );
 
   L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
-  placeUnitMarkers(null);
+  placeUnitMarkers(new Set());
 }
 
-function createIncidentIcon() {
-  return L.divIcon({ html: '<div class="map-incident-marker">⚠</div>', className: '', iconSize: [36,36], iconAnchor: [18,18], popupAnchor: [0,-20] });
+function createIncidentIcon(kindLabel) {
+  return L.divIcon({
+    html: `<div class="map-incident-marker"><span class="inc-pulse"></span>⚠</div>`,
+    className: '', iconSize: [40,40], iconAnchor: [20,20], popupAnchor: [0,-22]
+  });
 }
 
-function createUnitIcon(unit, dispatched) {
-  const cls = dispatched ? 'map-unit-marker dispatched' : 'map-unit-marker';
-  return L.divIcon({ html: `<div class="${cls}">${unit.icon}</div>`, className: '', iconSize: [30,30], iconAnchor: [15,15], popupAnchor: [0,-18] });
+function createUnitIcon(unit, isDispatched, routeColor) {
+  const style = isDispatched
+    ? `border: 2px solid ${routeColor || '#F5C518'}; box-shadow: 0 0 0 3px ${(routeColor||'#F5C518')}44;`
+    : '';
+  const cls = isDispatched ? 'map-unit-marker dispatched' : 'map-unit-marker';
+  return L.divIcon({
+    html: `<div class="${cls}" style="${style}">${unit.icon}</div>`,
+    className: '', iconSize: [32,32], iconAnchor: [16,16], popupAnchor: [0,-18]
+  });
 }
 
-function placeUnitMarkers(dispatchedId) {
+function placeUnitMarkers(dispatchedIds, dispatchedUnitsMap = {}) {
   Object.values(mapLayers.units).forEach(l => { try { leafletMap.removeLayer(l); } catch {} });
   mapLayers.units = {};
 
   ALL_PARIS_UNITS.forEach(unit => {
-    const dispatched = unit.id === dispatchedId;
-    const marker = L.marker([unit.lat, unit.lng], { icon: createUnitIcon(unit, dispatched) }).addTo(leafletMap);
-    marker.bindPopup(`<strong>${unit.label}</strong><br>${unit.type.replace('_',' ')}`);
+    const isDispatched = dispatchedIds.has(unit.id);
+    const dispatchedUnit = dispatchedUnitsMap[unit.id];
+    const color  = isDispatched ? (ROUTE_COLORS[unit.type] || '#F5C518') : null;
+    const marker = L.marker([unit.lat, unit.lng], { icon: createUnitIcon(unit, isDispatched, color) }).addTo(leafletMap);
+    const popupText = isDispatched && dispatchedUnit
+      ? `<strong>${unit.label}</strong><br>${unit.type.replace('_',' ')}<br>ETA: <b>${dispatchedUnit.etaMin} min</b> · ${dispatchedUnit.distKm} km`
+      : `<strong>${unit.label}</strong><br>${unit.type.replace('_',' ')} · Available`;
+    marker.bindPopup(popupText);
+    if (isDispatched) marker.openPopup();
     mapLayers.units[unit.id] = marker;
   });
 }
 
 function updateMapForDispatch(dispatchResult) {
+  // Remove old incident marker + all routes
   if (mapLayers.incident) { try { leafletMap.removeLayer(mapLayers.incident); } catch {} }
-  if (mapLayers.route)    { try { leafletMap.removeLayer(mapLayers.route); }    catch {} }
+  mapLayers.routes.forEach(l => { try { leafletMap.removeLayer(l); } catch {} });
+  mapLayers.routes = [];
 
-  const inc  = dispatchResult.incident;
-  const unit = dispatchResult.unit;
+  const inc = dispatchResult.incident;
 
-  // Find unit coords from our client list
-  const clientUnit = ALL_PARIS_UNITS.find(u => u.id === unit.id) || unit;
-
+  // Incident marker
   mapLayers.incident = L.marker([inc.lat, inc.lng], { icon: createIncidentIcon() }).addTo(leafletMap);
-  mapLayers.incident.bindPopup('<strong>⚠ INCIDENT</strong>').openPopup();
+  mapLayers.incident.bindPopup(
+    `<strong>⚠ ${(dispatchResult.incident_kind||'').replace(/_/g,' ').toUpperCase()}</strong><br>${inc.name}`
+  ).openPopup();
 
-  placeUnitMarkers(unit.id);
+  // Build lookup maps for dispatched units
+  const dispatchedIds  = new Set(dispatchResult.units.map(u => u.id));
+  const dispatchedMap  = {};
+  dispatchResult.units.forEach(u => { dispatchedMap[u.id] = u; });
 
-  mapLayers.route = L.polyline(
-    [[clientUnit.lat, clientUnit.lng], [inc.lat, inc.lng]],
-    { color: '#F5C518', weight: 3, dashArray: '8 6', opacity: 0.9 }
-  ).addTo(leafletMap);
+  // Re-render all unit markers (dispatched ones glow in their type color)
+  placeUnitMarkers(dispatchedIds, dispatchedMap);
 
-  leafletMap.fitBounds(
-    L.latLngBounds([inc.lat, inc.lng], [clientUnit.lat, clientUnit.lng]).pad(0.35)
-  );
+  // Draw one colored route line per dispatched unit
+  const allPoints = [[inc.lat, inc.lng]];
+
+  dispatchResult.units.forEach(unit => {
+    const clientUnit = ALL_PARIS_UNITS.find(u => u.id === unit.id) || unit;
+    const color = ROUTE_COLORS[unit.type] || '#94A3B8';
+
+    const line = L.polyline(
+      [[clientUnit.lat, clientUnit.lng], [inc.lat, inc.lng]],
+      { color, weight: 3.5, dashArray: '9 6', opacity: 0.88 }
+    ).addTo(leafletMap);
+
+    line.bindTooltip(
+      `${unit.icon} ${unit.label}<br>ETA ${unit.etaMin} min · ${unit.distKm} km`,
+      { sticky: true }
+    );
+
+    mapLayers.routes.push(line);
+    allPoints.push([clientUnit.lat, clientUnit.lng]);
+  });
+
+  // Fit map to encompass incident + all responding units
+  if (allPoints.length > 1) {
+    leafletMap.fitBounds(L.latLngBounds(allPoints).pad(0.28));
+  }
 }
 
 function clearMapLayers() {
   if (mapLayers.incident) { try { leafletMap.removeLayer(mapLayers.incident); } catch {} }
-  if (mapLayers.route)    { try { leafletMap.removeLayer(mapLayers.route); }    catch {} }
+  mapLayers.routes.forEach(l => { try { leafletMap.removeLayer(l); } catch {} });
   Object.values(mapLayers.units).forEach(l => { try { leafletMap.removeLayer(l); } catch {} });
-  mapLayers = { incident: null, units: {}, route: null };
+  mapLayers = { incident: null, units: {}, routes: [] };
   ALL_PARIS_UNITS.forEach(u => { session.unitStatus[u.id] = 'available'; });
 }
 
@@ -643,7 +692,7 @@ function resetUI() {
   clearMapLayers();
   if (leafletMap) {
     leafletMap.setView([48.8580, 2.3300], 13);
-    placeUnitMarkers(null);
+    placeUnitMarkers(new Set());
   }
   setAnalysisProgress(false);
   setSystemStatus('ready', 'READY');
@@ -731,7 +780,9 @@ async function runPipeline(frame) {
 
         if (event.agent === 'dispatch') {
           const r = event.result;
-          setNodeResult('dispatch', `${r.unit.label} → ETA ${r.eta_minutes} min · ${r.distance_km} km`);
+          const names = r.units.map(u => u.label.split(' ')[0]).join(' + ');
+          const maxEta = Math.max(...r.units.map(u => u.etaMin));
+          setNodeResult('dispatch', `${r.units.length} units → ${names} · max ETA ${maxEta} min`);
         }
         break;
 
@@ -751,22 +802,47 @@ async function runPipeline(frame) {
       case 'dispatch': {
         const r = event.result;
 
-        // Mark unit as dispatched in session state
-        session.unitStatus[r.unit.id] = 'dispatched';
+        // Mark all dispatched units in session state
+        r.units.forEach(u => { session.unitStatus[u.id] = 'dispatched'; });
 
-        // Update Leaflet map
+        // Draw all routes on Leaflet map
         updateMapForDispatch(r);
 
-        // Timeline
-        setTimelineStep('tl-dispatch', 'alert', `${r.unit.label} dispatched · ${r.distance_km} km`, now());
+        // Timeline — list all units
+        const unitNames = r.units.map(u => u.label.split(' ')[0]).join(' + ');
+        const maxEta    = Math.max(...r.units.map(u => u.etaMin));
+        setTimelineStep('tl-dispatch', 'alert', `${unitNames} dispatched · max ETA ${maxEta} min`, now());
 
-        // Dispatch card on alert panel
+        // Multi-unit dispatch card in alert panel
         const dc = document.getElementById('dispatchCard');
         if (dc) {
-          setText('dcUnit', r.unit.label);
-          setText('dcEta',  `${r.eta_minutes} min ETA`);
-          setText('dcDist', `${r.distance_km} km`);
+          const grid = document.getElementById('dcUnitsGrid');
+          if (grid) {
+            grid.innerHTML = r.units.map(unit => {
+              const color = ROUTE_COLORS[unit.type] || '#94A3B8';
+              const roleLabel = unit.role === 'primary' ? '★ Primary' : '↺ Support';
+              return `<div class="dc-unit-row" style="border-left:3px solid ${color}">
+                <span class="du-icon">${unit.icon}</span>
+                <div class="du-info">
+                  <div class="du-name">${unit.label}</div>
+                  <div class="du-meta">${unit.etaMin} min ETA · ${unit.distKm} km</div>
+                </div>
+                <span class="du-role-badge" style="color:${color}">${roleLabel}</span>
+              </div>`;
+            }).join('');
+          }
           dc.classList.remove('hidden');
+        }
+
+        // Alert panel info tab
+        const ig = document.getElementById('infoGrid');
+        if (ig && r.incident) {
+          ig.innerHTML = `
+            <div class="info-row"><span class="info-key">Location</span><span class="info-val">${r.incident.name}</span></div>
+            <div class="info-row"><span class="info-key">Terrain</span><span class="info-val">${r.terrain||'—'}</span></div>
+            <div class="info-row"><span class="info-key">Coords</span><span class="info-val" style="font-family:var(--fm);font-size:10px">${r.incident.lat.toFixed(4)}°N ${r.incident.lng.toFixed(4)}°E</span></div>
+            <div class="info-row"><span class="info-key">Units</span><span class="info-val">${r.units.length} responding</span></div>
+          `;
         }
 
         // Alert panel
@@ -774,28 +850,42 @@ async function runPipeline(frame) {
         setText('alertIncidentNo', `No: #INC-${String(incidentCount).padStart(4,'0')}`);
         showAlertPanel();
 
-        // Detection stamp on image
+        // Detection stamp on uploaded image
         const ds = document.getElementById('detectionStamp');
         if (ds) {
-          ds.textContent = `🚨 ${r.unit.label} DISPATCHED · ETA ${r.eta_minutes} min`;
+          ds.textContent = `🚨 ${unitNames} DISPATCHED`;
           ds.className   = 'detection-stamp alert';
-          setTimeout(() => { if(ds) ds.className = 'detection-stamp hidden'; }, 8000);
+          setTimeout(() => { if(ds) ds.className = 'detection-stamp hidden'; }, 10000);
         }
 
-        // Session tracking
+        // Session tracking (log primary unit for history table)
         session.dispatches++;
+        const primaryUnit = r.units.find(u => u.role === 'primary') || r.units[0];
         session.history.push({
-          time: now(),
-          kind: detectedKind,
-          unit: r.unit.label,
-          eta:  r.eta_minutes,
-          alertLevel: detectedAlertLevel
+          time:       now(),
+          kind:       detectedKind,
+          unit:       unitNames,
+          eta:        maxEta,
+          alertLevel: detectedAlertLevel,
+          location:   r.incident?.name || '—'
         });
 
-        // Cross-view updates
-        addDispatchLogEntry(r.unit.label, detectedKind, r.eta_minutes, r.distance_km);
-        addNotification('🚨', `${r.unit.label} Dispatched`, `${KIND_LABELS[detectedKind]||detectedKind} · ETA ${r.eta_minutes} min · ${r.distance_km} km`, true);
-        addChatMessage('🚨', 'DISPATCH ALERT', `<strong>${r.unit.label}</strong> has been dispatched for ${KIND_LABELS[detectedKind]||detectedKind}. ETA ${r.eta_minutes} minutes. Distance ${r.distance_km} km.`, true);
+        // Cross-view updates (one notification per dispatched unit)
+        r.units.forEach((unit, i) => {
+          const isFirst = i === 0;
+          addDispatchLogEntry(unit.label, detectedKind, unit.etaMin, unit.distKm);
+          if (isFirst) {
+            addNotification('🚨',
+              `${r.units.length} Units Dispatched — ${r.incident?.name || 'Paris'}`,
+              `${KIND_LABELS[detectedKind]||detectedKind} · ${unitNames}`,
+              true
+            );
+            addChatMessage('🚨', 'DISPATCH ALERT',
+              `<strong>${unitNames}</strong> responding to ${KIND_LABELS[detectedKind]||detectedKind} at <em>${r.incident?.name||'Paris'}</em>. Primary ETA: ${primaryUnit?.etaMin} min.`,
+              true
+            );
+          }
+        });
         break;
       }
 

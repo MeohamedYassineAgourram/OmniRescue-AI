@@ -72,9 +72,15 @@ app.post('/api/respond', async (req, res) => {
       tps: reporterResult._tps
     });
 
-    // 4. Dispatch — deterministic nearest unit (uses watcher kind, not LLM recommendation)
+    // 4. Dispatch — deterministic multi-unit (kind + terrain + AI-detected location)
     emit(res, { type: 'agent_start', agent: 'dispatch', ts: Date.now() });
-    const dispatchResult = dispatch.findNearest(reporterResult, scenarioName, watcherResult.kind);
+    const dispatchResult = dispatch.findDispatch(
+      reporterResult,
+      scenarioName,
+      watcherResult.kind,
+      watcherResult.terrain       || 'road',
+      watcherResult.location_hint || 'paris_center'
+    );
     emit(res, { type: 'dispatch', result: dispatchResult, duration_ms: 1 });
     emit(res, { type: 'agent_complete', agent: 'dispatch', result: dispatchResult, duration_ms: 1 });
 

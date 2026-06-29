@@ -287,8 +287,8 @@
       <div class="card-hd"><span class="card-hd-title">Incident Log</span></div>
       <div class="history-table-wrap">
         <table class="history-table">
-          <thead><tr><th>Time</th><th>Kind</th><th>Unit Dispatched</th><th>ETA</th><th>Alert</th></tr></thead>
-          <tbody id="historyTableBody"><tr><td colspan="5" class="history-empty">No incidents recorded yet</td></tr></tbody>
+          <thead><tr><th>Time</th><th>Kind</th><th>Units Dispatched</th><th>Location</th><th>ETA</th><th>Alert</th></tr></thead>
+          <tbody id="historyTableBody"><tr><td colspan="6" class="history-empty">No incidents recorded yet</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -525,9 +525,8 @@
         </div>
       </div>
       <div class="dispatch-card hidden" id="dispatchCard">
-        <div class="dc-label">Responding Unit</div>
-        <div class="dc-unit" id="dcUnit">—</div>
-        <div class="dc-meta"><span id="dcEta">— min ETA</span><span class="dc-sep">·</span><span id="dcDist">— km</span></div>
+        <div class="dc-label">Responding Units</div>
+        <div id="dcUnitsGrid"></div>
       </div>
     </div>
     <div class="ap-body hidden" id="apBrief">
